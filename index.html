@@ -449,7 +449,7 @@ async function loadAllData() {
   if (sch) schedule = sch;
   if (fc) forecast = fc;
   if (req) { requests = req.list || []; reqIdCounter = req.counter || 1; }
-  if (emp) { employees = emp.list || employees; nextId = emp.nextId || nextId; }
+  if (emp) { employees = (emp.list || employees).map(e => ({ ...e, active: e.active !== false })); nextId = emp.nextId || nextId; }
   if (rt) payRates = rt;
   if (pn) pins = pn;
 }
@@ -911,6 +911,7 @@ async function renderHistory(searchDate) {
       + '<div class="history-btns">'
       + '<button class="history-btn edit" onclick="openHistEdit(\'' + r.week_start + '\')">✏️ Edit</button>'
       + '<button class="history-btn pdf" onclick="printHistoryPDF(\'' + r.week_start + '\',\'' + r.week_end + '\',' + r.id + ')">📄 PDF</button>'
+      + (currentUser.role===ROLES.OWNER ? '<button class="history-btn" style="background:rgba(224,92,106,0.12);color:var(--red);" onclick="deleteHistRecord(\'' + r.week_start + '\')" >🗑️ Delete</button>' : '')
       + '</div>';
     c.appendChild(div);
   });
@@ -1004,6 +1005,16 @@ function closeHistModalDirect() {
   document.getElementById('hist-modal-overlay').style.display = 'none';
   editingHistWeekStart = null;
   editingHistSchedule = {};
+}
+
+async function deleteHistRecord(weekStart) {
+  const record = historyRecordsCache.find(r => r.week_start === weekStart);
+  if(!record) return;
+  const startDate = new Date(weekStart);
+  const fmt = d => d.toLocaleDateString('ms-MY',{day:'numeric',month:'short',year:'numeric'});
+  if(!confirm('Padam rekod minggu ' + fmt(startDate) + '?')) return;
+  await supaFetch('DELETE', 'schedule_history?week_start=eq.' + weekStart);
+  renderHistory();
 }
 
 async function printHistoryPDF(weekStart, weekEnd, recordId) {
