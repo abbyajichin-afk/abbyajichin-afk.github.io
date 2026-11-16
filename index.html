@@ -448,6 +448,24 @@ function dayCount(schedData, empId) {
   }
   return n;
 }
+/* ---------- CUTI UMUM (dari Supabase mm_public_holidays, sama dengan Internal App) ---------- */
+let publicHolidays = {};
+async function loadHolidays() {
+  const res = await supaFetch('GET', 'mm_public_holidays?select=holiday_date,name');
+  publicHolidays = {};
+  (res || []).forEach(function(h){ publicHolidays[h.holiday_date] = h.name || 'Cuti Umum'; });
+}
+// bilangan hari kerja (0.5 utk half) yang jatuh pada cuti umum dalam minggu weekKey (YYYY-MM-DD, Isnin)
+function phDayCount(schedData, empId, weekKey) {
+  let n = 0;
+  const p = String(weekKey).split('-').map(Number);
+  for (let i = 0; i < 7; i++) {
+    const v = schedData && schedData[empId] ? schedData[empId][i] : null;
+    if (v !== true && v !== 'half') continue;
+    if (publicHolidays[dateKey(new Date(p[0], p[1]-1, p[2]+i))]) n += (v === 'half' ? 0.5 : 1);
+  }
+  return n;
+}
 function dailyRateOf(emp) {
   if (emp.monthlyRate > 0) return parseFloat((emp.monthlyRate / 26).toFixed(2));
   return payRates[emp.type] || 0;
@@ -686,15 +704,16 @@ function renderGaji() {
     let sectionHtml = '<div class="type-label" style="color:' + color + ';margin-top:6px;"><span class="type-dot" style="background:' + color + '"></span>' + TYPE_LABELS[type] + '</div>';
     emps.forEach(function(emp) {
       const days = dayCount(schedData, emp.id);
+      const ph = phDayCount(schedData, emp.id, gajiWeek);
       const rate = dailyRateOf(emp);
-      const pay = parseFloat((days * rate).toFixed(2));
+      const pay = parseFloat(((days + ph) * rate).toFixed(2));
       total += pay;
       if (days > 0) count++;
       hasAny = true;
       const paid = wkPay[emp.id] === true;
       sectionHtml += '<div class="pay-row">'
         + '<div><div class="pay-name">' + emp.name + '</div>'
-        + '<div class="pay-detail">' + days + ' hari \u00D7 RM' + rate.toFixed(2) + (emp.monthlyRate > 0 ? ' (RM' + emp.monthlyRate + '\u00F726)' : '') + '</div></div>'
+        + '<div class="pay-detail">' + days + ' hari \u00D7 RM' + rate.toFixed(2) + (emp.monthlyRate > 0 ? ' (RM' + emp.monthlyRate + '\u00F726)' : '') + (ph > 0 ? ' + ' + ph + ' hari cuti umum \u{1F389} (2x)' : '') + '</div></div>'
         + '<div><div class="pay-amt">RM ' + pay.toFixed(2) + '</div>'
         + '<div class="pay-check' + (paid ? ' paid' : '') + '"><input type="checkbox" id="paid-' + emp.id + '"' + (paid ? ' checked' : '') + ' onchange="togglePaid(' + emp.id + ')"><label for="paid-' + emp.id + '">' + (paid ? '\u2705 Dah Bayar' : 'Belum Bayar') + '</label></div>'
         + '</div></div>';
@@ -727,7 +746,8 @@ async function renderMonthSummary() {
       weekCount++;
       activeEmployees().forEach(function(emp) {
         const days = dayCount(r.schedule_data || {}, emp.id);
-        mTotal += days * dailyRateOf(emp);
+        const ph = phDayCount(r.schedule_data || {}, emp.id, r.week_start);
+        mTotal += (days + ph) * dailyRateOf(emp);
       });
     }
   });
@@ -810,15 +830,16 @@ function printPayrollPDF() {
     html += '<th>Hari</th><th>Kadar</th><th class="amt">Jumlah</th></tr>';
     emps.forEach(function(emp) {
       const days = dayCount(schedData, emp.id);
+      const ph = phDayCount(schedData, emp.id, gajiWeek);
       const rate = dailyRateOf(emp);
-      const pay = days * rate;
+      const pay = (days + ph) * rate;
       total += pay;
       html += '<tr><td class="nm">' + emp.name + '</td>';
       for (let di = 0; di < 7; di++) {
         const v = schedData[emp.id] ? schedData[emp.id][di] : null;
         html += '<td>' + (v === true ? '<span class="tick">\u2713</span>' : (v === 'half' ? '<span class="tick">\u00BD</span>' : '')) + '</td>';
       }
-      html += '<td><b>' + days + '</b></td><td>RM' + rate.toFixed(2) + '</td><td class="amt">RM ' + pay.toFixed(2) + '</td></tr>';
+      html += '<td><b>' + days + (ph > 0 ? ' +' + ph + ' (cuti umum 2x)' : '') + '</b></td><td>RM' + rate.toFixed(2) + '</td><td class="amt">RM ' + pay.toFixed(2) + '</td></tr>';
     });
     html += '</table>';
   });
@@ -1307,6 +1328,7 @@ async function init() {
   if (p) pins = p;
   const pr = await loadKV('payRates');
   if (pr) payRates = Object.assign(payRates, pr);
+  await loadHolidays();
   await loadRequests();
   tryAutoLogin();
 }
